@@ -30,9 +30,11 @@ export class MouseGestureController {
   private eventListenersAttached = false;
   private pressedButtons = new Set<number>(); // For rocker gestures
   private isRockerGestureFired = false;
+  private targetWindow: Window;
 
-  constructor() {
-    this.display = new GestureDisplay();
+  constructor(win: Window = globalThis as unknown as Window) {
+    this.targetWindow = win;
+    this.display = new GestureDisplay(win);
     this.init();
   }
 
@@ -44,6 +46,9 @@ export class MouseGestureController {
       globalThis.addEventListener("mousemove", this.handleMouseMove);
       globalThis.addEventListener("mouseup", this.handleMouseUp);
       globalThis.addEventListener("contextmenu", this.handleContextMenu, true);
+      globalThis.addEventListener("wheel", this.handleMouseWheel, {
+        passive: false,
+      });
       this.eventListenersAttached = true;
     }
   }
@@ -58,6 +63,7 @@ export class MouseGestureController {
         this.handleContextMenu,
         true,
       );
+      globalThis.removeEventListener("wheel", this.handleMouseWheel);
       this.eventListenersAttached = false;
     }
 
@@ -100,7 +106,7 @@ export class MouseGestureController {
       }
 
       if (action) {
-        executeGestureAction(action);
+        executeGestureAction(action, this.targetWindow);
         event.preventDefault();
         event.stopPropagation();
         this.isRockerGestureFired = true;
@@ -206,7 +212,7 @@ export class MouseGestureController {
         this.activeActionName = getActionDisplayName(matchingAction.action);
         this.display.updateActionName(this.activeActionName);
         setTimeout(() => {
-          executeGestureAction(matchingAction.action);
+          executeGestureAction(matchingAction.action, this.targetWindow);
           this.resetGestureState();
           this.preventionTimeoutId = setTimeout(() => {
             this.isContextMenuPrevented = false;
@@ -234,6 +240,41 @@ export class MouseGestureController {
     }, preventionTimeout);
 
     this.resetGestureState();
+  };
+
+  private handleMouseWheel = (event: WheelEvent): void => {
+    if (!this.isGestureActive || !isEnabled()) {
+      return;
+    }
+
+    const config = getConfig();
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (!config.wheelGesturesEnabled) {
+      return;
+    }
+
+    let action: string | null = null;
+    if (event.deltaY < 0) {
+      action = "gecko-show-previous-tab";
+    } else if (event.deltaY > 0) {
+      action = "gecko-show-next-tab";
+    }
+
+    if (action) {
+      executeGestureAction(action, this.targetWindow);
+      event.preventDefault();
+      event.stopPropagation();
+
+      this.isContextMenuPrevented = true;
+
+      if (this.preventionTimeoutId) {
+        clearTimeout(this.preventionTimeoutId);
+      }
+      this.preventionTimeoutId = setTimeout(() => {
+        this.isContextMenuPrevented = false;
+        this.preventionTimeoutId = null;
+      }, getConfig().contextMenu.preventionTimeout);
+    }
   };
 
   private getTotalMovement(): number {
